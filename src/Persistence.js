@@ -286,6 +286,7 @@ export function logSession(type, session) {
 	};
 	for (let prop of [
 		"boostersPerPlayer",
+		"cardsPerBooster",
 		"teamDraft",
 		"ignoreCollections",
 		"mythicPromotion",

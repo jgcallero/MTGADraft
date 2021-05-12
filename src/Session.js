@@ -27,6 +27,7 @@ export const optionProps = [
 	"description",
 	"ignoreCollections",
 	"boostersPerPlayer",
+	"cardsPerBooster",
 	"teamDraft",
 	"bots",
 	"maxTimer",
@@ -217,6 +218,7 @@ export class Session {
 		this.description = "";
 		this.ignoreCollections = false;
 		this.boostersPerPlayer = 3;
+		this.cardsPerBooster = 15;
 		this.teamDraft = false;
 		this.bots = 0;
 		this.maxTimer = 75;
@@ -237,7 +239,7 @@ export class Session {
 		this.draftLogRecipients = "everyone";
 		this.bracketLocked = false; // If set, only the owner can edit the results.
 		this.bracket = undefined;
-
+		this.cardsPerBooster = 15;
 		if (options) for (let p in options) this[p] = options[p];
 
 		// Draft state
@@ -314,6 +316,19 @@ export class Session {
 				Connections[u].socket.emit("sessionOptions", {
 					boostersPerPlayer: this.boostersPerPlayer,
 					customBoosters: this.customBoosters,
+				})
+			);
+		}
+	}
+
+	setCardsPerBooster(cardsPerBooster) {
+		if (this.cardsPerBooster != cardsPerBooster && cardsPerBooster > 0) {
+			this.cardsPerBooster = cardsPerBooster;
+		
+		
+			this.forUsers(u =>
+				Connections[u].socket.emit("sessionOptions", {
+					cardsPerBooster: this.cardsPerBooster,
 				})
 			);
 		}
@@ -1149,7 +1164,7 @@ export class Session {
 		this.botsInstances = [];
 		for (let i = 0; i < this.bots; ++i) this.botsInstances.push(new Bot(`Bot #${i + 1}`, uuidv1()));
 
-		if (!this.generateBoosters(boosterQuantity, { useCustomBoosters: true })) {
+		if (!this.generateBoosters(boosterQuantity, { useCustomBoosters: true, cardsPerBooster: this.cardsPerBooster })) {
 			this.drafting = false;
 			return;
 		}

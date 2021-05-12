@@ -432,6 +432,14 @@ const ownerSocketCallbacks = {
 
 		Sessions[sessionID].setBoostersPerPlayer(boostersPerPlayer);
 	},
+	setCardsPerBooster: function(userID, sessionID, cardsPerBooster) {
+		if (!Number.isInteger(cardsPerBooster)) cardsPerBooster = parseInt(cardsPerBooster);
+		if (!Number.isInteger(cardsPerBooster) || cardsPerBooster <= 0) return;
+		
+		if (cardsPerBooster == Sessions[sessionID].cardsPerBooster) return;
+
+		Sessions[sessionID].setCardsPerBooster(cardsPerBooster);
+	},
 	teamDraft: function(userID, sessionID, teamDraft) {
 		if (!(typeof teamDraft === "boolean")) teamDraft = teamDraft === "true" || !!teamDraft;
 		if (!(typeof teamDraft === "boolean")) return;

@@ -399,7 +399,7 @@ const ownerSocketCallbacks = {
 
 		Sessions[sessionID].setBoostersPerPlayer(boostersPerPlayer);
 	},
-	setCardsPerBooster: function(userID, sessionID, cardsPerBooster) {
+	setCardsPerBooster: (userID, sessionID, cardsPerBooster) {
 		if (!Number.isInteger(cardsPerBooster)) cardsPerBooster = parseInt(cardsPerBooster);
 		if (!Number.isInteger(cardsPerBooster) || cardsPerBooster <= 0) return;
 		
@@ -407,7 +407,7 @@ const ownerSocketCallbacks = {
 
 		Sessions[sessionID].setCardsPerBooster(cardsPerBooster);
 	},
-	teamDraft: function(userID, sessionID, teamDraft) {
+	teamDraft: (userID, sessionID, teamDraft) {
 		if (!(typeof teamDraft === "boolean")) teamDraft = teamDraft === "true" || !!teamDraft;
 		if (!(typeof teamDraft === "boolean")) return;
 

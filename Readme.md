@@ -1,5 +1,4 @@
 # MTGADraft
-My Branch
 
 ## Contact
 

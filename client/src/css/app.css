@@ -42,6 +42,33 @@ select.swal2-input option {
 	background-color: #282828;
 }
 
+.disconnected-user-popup-container {
+	position: absolute;
+	user-select: none;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	z-index: 600;
+	border-radius: 0.5em;
+	background-color: #00000060;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.disconnected-user-popup {
+	background-color: #222222;
+	text-align: center;
+	padding: 2em;
+	border-radius: 0.5em;
+	min-width: 30%;
+}
+
+.disconnected-user-popup h1 {
+	margin-top: 0;
+}
+
 #main-container {
 	padding: 1em;
 	padding-top: 0.5em;
@@ -626,7 +653,7 @@ select.swal2-input option {
 ul.player-list {
 	display: inline-flex;
 	list-style: none;
-	flex-grow: 2;
+	width: 100%;
 	padding-left: 0;
 	margin: 0;
 	flex-wrap: wrap;
@@ -644,22 +671,26 @@ ul.player-list {
 	margin-left: 0.5em;
 	background: #282828;
 	border-radius: 5px;
-	transition: all 0.2s;
 	flex: 1 1 9.5em;
+}
+
+/* Applying a transition to draggable item break SortableJS animations, here it's only applied for other player to get feedback when owner changes the order */
+.player-list li:not(.draggable) {
+	transition: all 0.2s;
 }
 
 .player-list li.self {
 	box-shadow: inset 0 0 5px 0px rgba(255, 255, 255, 0.3);
 }
 
-.player-list > li.draggable {
+.player-list li.draggable {
 	transform: translateY(0);
 }
-.player-list > li.draggable:hover {
+.player-list li.draggable:hover {
 	transform: translateY(-3px);
 	box-shadow: 3px 3px 5px 0 rgba(0, 0, 0, 0.75);
 }
-.player-list > li.draggable.self:hover {
+.player-list li.draggable.self:hover {
 	box-shadow: inset 0 0 5px 0px rgba(255, 255, 255, 0.3), 3px 3px 5px 0 rgba(0, 0, 0, 0.75);
 }
 
@@ -749,6 +780,10 @@ ul.player-list {
 	overflow: visible;
 }
 
+.booster-cards-leave-active.selected .card-image {
+	width: 200px;
+}
+
 .booster-cards-leave-to.selected {
 	transform: translateY(250px) translateX(-100px); /* translateX compensates for width change */
 	z-index: 2;
@@ -808,6 +843,7 @@ ul.player-list {
 	font-family: Calibri;
 	text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
 	font-weight: 600;
+	white-space: nowrap;
 }
 
 .booster-waiting .wait .passing-order {
@@ -965,12 +1001,13 @@ ul.player-list {
 	margin: 0;
 }
 
+/* Bug in webkit applies with style to another element while drag & dropping https://bugs.webkit.org/show_bug.cgi?id=134555 */
 .card-column .card:hover {
 	z-index: 999;
 }
 
 .card-column .card:last-child {
-	padding-bottom: 142.5%;
+	margin-bottom: 142.5%;
 }
 
 /* Only use this hover rule on desktop (hover capabilities and a mouse or equivalent device) */

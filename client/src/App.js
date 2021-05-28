@@ -19,6 +19,7 @@ import Modal from "./components/Modal.vue";
 import DelayedInput from "./components/DelayedInput.vue";
 import Card from "./components/Card.vue";
 import CardPlaceholder from "./components/CardPlaceholder.vue";
+import CardPopup from "./components/CardPopup.vue";
 import Dropdown from "./components/Dropdown.vue";
 import BoosterCard from "./components/BoosterCard.vue";
 import CardPool from "./components/CardPool.vue";
@@ -77,6 +78,7 @@ export default {
 		DelayedInput,
 		Card,
 		CardPlaceholder,
+		CardPopup,
 		Dropdown,
 		BoosterCard,
 		CardPool,
@@ -120,6 +122,7 @@ export default {
 			description: "",
 			ignoreCollections: false,
 			sessionUsers: [],
+			disconnectedUsers: {},
 			boostersPerPlayer: 3,
 			cardsPerBooster: 15,
 			teamDraft: false,
@@ -159,6 +162,7 @@ export default {
 			winstonDraftState: null,
 			gridDraftState: null,
 			rochesterDraftState: null,
+			draftPaused: false,
 
 			publicSessions: [],
 
@@ -303,59 +307,12 @@ export default {
 			this.socket.on("userDisconnected", data => {
 				if (!this.drafting) return;
 				this.sessionOwner = data.owner;
+				this.disconnectedUsers = data.disconnectedUsers;
+			});
 
-				if (this.winstonDraftState || this.gridDraftState || this.rochesterDraftState) {
-					if (this.userID === this.sessionOwner) {
-						Alert.fire({
-							position: "center",
-							icon: "error",
-							title: `Player(s) disconnected`,
-							text: `Wait for ${data.disconnectedUserNames.join(", ")} to come back or...`,
-							showConfirmButton: true,
-							allowOutsideClick: false,
-							confirmButtonText: "Stop draft",
-							confirmButtonColor: ButtonColor.Critical,
-						}).then(result => {
-							if (result.value) this.socket.emit("stopDraft");
-						});
-					} else {
-						Alert.fire({
-							position: "center",
-							icon: "error",
-							title: `Player(s) disconnected`,
-							text: `Wait for ${data.disconnectedUserNames.join(
-								", "
-							)} to come back or for the session owner to stop the draft.`,
-							showConfirmButton: false,
-							allowOutsideClick: false,
-						});
-					}
-				} else {
-					if (this.userID === this.sessionOwner) {
-						Alert.fire({
-							position: "center",
-							icon: "error",
-							title: `Player(s) disconnected`,
-							text: `Wait for ${data.disconnectedUserNames.join(", ")} to come back or...`,
-							showConfirmButton: true,
-							allowOutsideClick: false,
-							confirmButtonText: "Replace them by bot(s)",
-						}).then(result => {
-							if (result.value) this.socket.emit("replaceDisconnectedPlayers");
-						});
-					} else {
-						Alert.fire({
-							position: "center",
-							icon: "error",
-							title: `Player(s) disconnected`,
-							text: `Wait for ${data.disconnectedUserNames.join(
-								", "
-							)} to come back or for the owner to replace them by bot(s).`,
-							showConfirmButton: false,
-							allowOutsideClick: false,
-						});
-					}
-				}
+			this.socket.on("resumeOnReconnection", data => {
+				this.disconnectedUsers = {};
+				fireToast("success", data.msg.title, data.msg.text);
 			});
 
 			this.socket.on("updateUser", data => {
@@ -439,16 +396,16 @@ export default {
 
 				this.initReadyCheck();
 
-				this.pushNotification("Are you ready?", {
-					body: `${this.userByID[this.sessionOwner].userName} has initiated a ready check`,
-				});
-
 				const ownerUsername =
 					this.sessionOwner in this.userByID
 						? this.userByID[this.sessionOwner].userName
 						: this.sessionOwnerUsername
 						? this.sessionOwnerUsername
 						: "Session owner";
+
+				this.pushNotification("Are you ready?", {
+					body: `${ownerUsername} has initiated a ready check`,
+				});
 
 				Alert.fire({
 					position: "center",
@@ -765,28 +722,12 @@ export default {
 			});
 
 			this.socket.on("pauseDraft", () => {
-				if (this.userID === this.sessionOwner) {
-					Alert.fire({
-						position: "center",
-						icon: "info",
-						title: `Draft Paused`,
-						text: `Resume when you're ready.`,
-						showConfirmButton: true,
-						allowOutsideClick: false,
-						confirmButtonText: "Resume",
-					}).then(result => {
-						if (result.value) this.socket.emit("resumeDraft");
-					});
-				} else {
-					Alert.fire({
-						position: "center",
-						icon: "info",
-						title: `Draft Paused`,
-						text: `Wait for the session owner to resume.`,
-						showConfirmButton: false,
-						allowOutsideClick: false,
-					});
-				}
+				this.draftPaused = true;
+			});
+
+			this.socket.on("resumeDraft", () => {
+				this.draftPaused = false;
+				fireToast("success", "Draft Resumed");
 			});
 
 			this.socket.on("draftLog", draftLog => {
@@ -815,7 +756,10 @@ export default {
 
 			this.socket.on("draftLogLive", data => {
 				if (data.log) this.draftLogLive = data.log;
-				if (data.pick) this.draftLogLive.users[data.userID].picks.push(data.pick);
+				if (data.pick) {
+					this.draftLogLive.users[data.userID].picks.push(data.pick);
+					if (this.$refs.draftloglive) this.$refs.draftloglive.newPick(data);
+				}
 			});
 
 			this.socket.on("pickAlert", data => {
@@ -859,6 +803,7 @@ export default {
 			});
 		},
 		clearState: function() {
+			this.disconnectedUsers = {};
 			this.clearSideboard();
 			this.clearDeck();
 			this.deckFilter = "";
@@ -1867,8 +1812,16 @@ export default {
 				if (answer.code === 0) this.displayedModal = "bracket";
 			});
 		},
-		updateBracket: function() {
+		generateDoubleBracket: function() {
+			if (this.userID != this.sessionOwner || this.teamDraft) return;
+			let players = this.prepareBracketPlayers([0, 4, 2, 6, 1, 5, 3, 7]);
+			this.socket.emit("generateDoubleBracket", players, answer => {
+				if (answer.code === 0) this.displayedModal = "bracket";
+			});
+		},
+		updateBracket: function(matchIndex, index, value) {
 			if (this.userID != this.sessionOwner && this.bracketLocked) return;
+			this.bracket.results[matchIndex][index] = value;
 			this.socket.emit("updateBracket", this.bracket.results);
 		},
 		lockBracket: function(val) {
@@ -2089,13 +2042,13 @@ export default {
 		},
 	},
 	computed: {
-		DraftState: function() {
+		DraftState() {
 			return DraftState;
 		},
-		ReadyState: function() {
+		ReadyState() {
 			return ReadyState;
 		},
-		gameModeName: function() {
+		gameModeName() {
 			if (this.rochesterDraftState) return "Rochester Draft";
 			if (this.winstonDraftState) return "Winston Draft";
 			if (this.gridDraftState) return "Grid Draft";
@@ -2103,14 +2056,14 @@ export default {
 			if (this.burnedCardsPerRound > 0) return "Glimpse Draft";
 			return "Draft";
 		},
-		cardsToPick: function() {
+		cardsToPick() {
 			if (this.rochesterDraftState) return 1;
 			return Math.min(this.pickedCardsPerRound, this.booster.length);
 		},
-		cardsToBurnThisRound: function() {
+		cardsToBurnThisRound() {
 			return Math.max(0, Math.min(this.burnedCardsPerRound, this.booster.length - this.cardsToPick));
 		},
-		winstonCanSkipPile: function() {
+		winstonCanSkipPile() {
 			const s = this.winstonDraftState;
 			return !(
 				!s.remainingCards &&
@@ -2119,7 +2072,16 @@ export default {
 					s.currentPile === 2)
 			);
 		},
-		virtualPlayers: function() {
+		waitingForDisconnectedUsers() {
+			if (!this.drafting) return false;
+			return Object.keys(this.disconnectedUsers).length > 0;
+		},
+		disconnectedUserNames() {
+			return Object.values(this.disconnectedUsers)
+				.map(u => u.userName)
+				.join(", ");
+		},
+		virtualPlayers() {
 			if (!this.drafting || !this.virtualPlayersData || Object.keys(this.virtualPlayersData).length == 0)
 				return this.sessionUsers;
 
@@ -2143,7 +2105,7 @@ export default {
 
 			return r;
 		},
-		displaySets: function() {
+		displaySets() {
 			let dSets = [];
 			for (let s of this.sets) {
 				if (this.setsInfos && s in this.setsInfos)
@@ -2155,29 +2117,29 @@ export default {
 			}
 			return dSets;
 		},
-		hasCollection: function() {
+		hasCollection() {
 			return !isEmpty(this.collection);
 		},
 
-		colorsInDeck: function() {
+		colorsInDeck() {
 			return this.colorsInCardPool(this.deck);
 		},
-		totalLands: function() {
+		totalLands() {
 			let addedLands = 0;
 			for (let c in this.lands) addedLands += this.lands[c];
 			return addedLands;
 		},
-		basicsInDeck: function() {
+		basicsInDeck() {
 			return this.deck.some(c => c.type === "Basic Land") || this.sideboard.some(c => c.type === "Basic Land");
 		},
-		neededWildcards: function() {
+		neededWildcards() {
 			if (!this.hasCollection) return null;
 			const main = this.countMissing(this.deck);
 			const side = this.countMissing(this.sideboard);
 			if (!main && !side) return null;
 			return { main: main, side: side };
 		},
-		deckSummary: function() {
+		deckSummary() {
 			const r = {};
 			for (let c of this.deck) {
 				if (!(c.id in r)) r[c.id] = 0;
@@ -2185,7 +2147,7 @@ export default {
 			}
 			return r;
 		},
-		displayWildcardInfo: function() {
+		displayWildcardInfo() {
 			return (
 				this.displayCollectionStatus &&
 				this.neededWildcards &&
@@ -2194,13 +2156,13 @@ export default {
 			);
 		},
 
-		userByID: function() {
+		userByID() {
 			let r = {};
 			for (let u of this.sessionUsers) r[u.userID] = u;
 			return r;
 		},
 
-		pageTitle: function() {
+		pageTitle() {
 			return `MTGA Draft (${this.sessionUsers.length}/${this.maxPlayers}) ${
 				this.titleNotification ? this.titleNotification.message : ""
 			}`;

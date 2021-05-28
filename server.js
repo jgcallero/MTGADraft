@@ -17,7 +17,6 @@ import socketIO from "socket.io";
 const io = socketIO(httpServer);
 import cookieParser from "cookie-parser";
 import uuidv1 from "uuid/v1.js";
-import bodyParser from "body-parser";
 
 import { isEmpty, shuffleArray } from "./src/utils.js";
 import constants from "./client/src/data/constants.json";
@@ -29,8 +28,8 @@ import { parseLine, parseCardList, XMageToArena } from "./src/parseCardList.js";
 
 app.use(compression());
 app.use(cookieParser());
-app.use(bodyParser.json());
-app.use(bodyParser.text({ type: "text/*" }));
+app.use(express.json());
+app.use(express.text({ type: "text/*" }));
 
 function shortguid() {
 	function s4() {
@@ -121,9 +120,21 @@ const parseCustomCardList = function(session, txtlist, options, ack) {
 	ack?.({ code: 0 });
 };
 
+const checkDraftAction = function(userID, sess, type, ack) {
+	if (!sess.drafting || sess.draftState?.type !== type) {
+		ack?.({ code: 2, error: "Not drafting." });
+		return false;
+	}
+	if (sess.draftState.currentPlayer && userID !== sess.draftState.currentPlayer()) {
+		ack?.({ code: 3, error: "Not your turn." });
+		return false;
+	}
+	return true;
+};
+
 const socketCallbacks = {
 	// Personnal options
-	setUserName: function(userID, sessionID, userName) {
+	setUserName(userID, sessionID, userName) {
 		Connections[userID].userName = userName;
 		Sessions[sessionID].forUsers(user =>
 			Connections[user].socket.emit("updateUser", {
@@ -134,7 +145,7 @@ const socketCallbacks = {
 			})
 		);
 	},
-	setCollection: function(userID, sessionID, collection, ack) {
+	setCollection(userID, sessionID, collection, ack) {
 		if (typeof collection !== "object" || collection === null) return;
 
 		let processedCollection = {};
@@ -150,40 +161,37 @@ const socketCallbacks = {
 		ack?.({ collection: processedCollection });
 
 		const hasCollection = !isEmpty(processedCollection);
-		if (Sessions[sessionID])
-			Sessions[sessionID].forUsers(user =>
-				Connections[user].socket.emit("updateUser", {
-					userID: userID,
-					updatedProperties: {
-						collection: hasCollection,
-					},
-				})
-			);
+		Sessions[sessionID].forUsers(user =>
+			Connections[user].socket.emit("updateUser", {
+				userID: userID,
+				updatedProperties: {
+					collection: hasCollection,
+				},
+			})
+		);
 	},
-	useCollection: function(userID, sessionID, useCollection) {
+	useCollection(userID, sessionID, useCollection) {
 		if (typeof useCollection !== "boolean" || useCollection === Connections[userID].useCollection) return;
 
 		Connections[userID].useCollection = useCollection;
-		if (Sessions[sessionID])
-			Sessions[sessionID].forUsers(user =>
-				Connections[user].socket.emit("updateUser", {
-					userID: userID,
-					updatedProperties: {
-						useCollection: useCollection,
-					},
-				})
-			);
+		Sessions[sessionID].forUsers(user =>
+			Connections[user].socket.emit("updateUser", {
+				userID: userID,
+				updatedProperties: {
+					useCollection: useCollection,
+				},
+			})
+		);
 	},
-	chatMessage: function(userID, sessionID, message) {
+	chatMessage(userID, sessionID, message) {
 		message.text = message.text.substring(0, Math.min(255, message.text.length)); // Limits chat message length
 		Sessions[sessionID].forUsers(user => Connections[user].socket.emit("chatMessage", message));
 	},
-	setReady: function(userID, sessionID, readyState) {
-		const sess = Sessions[sessionID];
-		sess.forUsers(user => Connections[user].socket.emit("setReady", userID, readyState));
+	setReady(userID, sessionID, readyState) {
+		Sessions[sessionID].forUsers(user => Connections[user].socket.emit("setReady", userID, readyState));
 	},
 
-	pickCard: function(userID, sessionID, data, ack) {
+	pickCard(userID, sessionID, data, ack) {
 		// Removes picked card from corresponding booster and notify other players.
 		// Moves to next round when each player have picked a card.
 		try {
@@ -200,79 +208,43 @@ const socketCallbacks = {
 			dumpError(`Error_PickCard_${sessionID}_${new Date().toISOString()}`, data);
 		}
 	},
-	gridDraftPick: function(userID, sessionID, choice, ack) {
-		const sess = Sessions[sessionID];
-		if (!sess.drafting || !sess.gridDraftState) {
-			ack?.({ code: 3, error: "Not drafting." });
-			return;
-		}
+	gridDraftPick(userID, sessionID, choice, ack) {
+		if (!checkDraftAction(userID, Sessions[sessionID], "grid", ack)) return;
 
-		if (userID !== sess.gridDraftState.currentPlayer()) {
-			ack?.({ code: 4, error: "Not your turn." });
-			return;
-		}
-
-		const r = sess.gridDraftPick(choice);
+		const r = Sessions[sessionID].gridDraftPick(choice);
 
 		if (!r) ack?.({ code: 1, error: "Internal error." });
 		else ack?.({ code: 0 });
 	},
-	rochesterDraftPick: function(userID, sessionID, choices, ack) {
-		const sess = Sessions[sessionID];
-		if (!sess.drafting || !sess.rochesterDraftState) {
-			ack?.({ code: 3, error: "Not drafting." });
-			return;
-		}
+	rochesterDraftPick(userID, sessionID, choices, ack) {
+		if (!checkDraftAction(userID, Sessions[sessionID], "rochester", ack)) return;
 
-		if (userID != sess.rochesterDraftState.currentPlayer()) {
-			ack?.({ code: 4, error: "Not your turn." });
-			return;
-		}
-
-		const r = sess.rochesterDraftPick(choices[0]);
+		const r = Sessions[sessionID].rochesterDraftPick(choices[0]);
 
 		if (!r) ack?.({ code: 1, error: "Internal error." });
 		else ack?.({ code: 0 });
 	},
 	// Winston Draft
-	winstonDraftTakePile: function(userID, sessionID, ack) {
-		const sess = Sessions[sessionID];
-		if (!sess.drafting || !sess.winstonDraftState) {
-			ack?.({ code: 2, error: "Not drafting." });
-			return;
-		}
+	winstonDraftTakePile(userID, sessionID, ack) {
+		if (!checkDraftAction(userID, Sessions[sessionID], "winston", ack)) return;
 
-		if (userID != sess.winstonDraftState.currentPlayer()) {
-			ack?.({ code: 3, error: "Not your turn." });
-			return;
-		}
-
-		const r = sess.winstonTakePile();
+		const r = Sessions[sessionID].winstonTakePile();
 
 		if (!r) ack?.({ code: 1, error: "Internal error." });
 		else ack?.({ code: 0 });
 	},
-	winstonDraftSkipPile: function(userID, sessionID, ack) {
-		const sess = Sessions[sessionID];
-		if (!sess.drafting || !sess.winstonDraftState) {
-			ack?.({ code: 1, error: "Not drafting." });
-			return;
-		}
+	winstonDraftSkipPile(userID, sessionID, ack) {
+		if (!checkDraftAction(userID, Sessions[sessionID], "winston", ack)) return;
 
-		if (userID !== sess.winstonDraftState.currentPlayer()) {
-			ack?.({ code: 1, error: "Not your turn." });
-			return;
-		}
-
-		const r = sess.winstonSkipPile();
+		const r = Sessions[sessionID].winstonSkipPile();
 
 		if (!r) ack?.({ code: 1, error: "This is your only choice!" });
 		else ack?.({ code: 0 });
 	},
-	shareDecklist: function(userID, sessionID, decklist) {
+	shareDecklist(userID, sessionID, decklist) {
 		Sessions[sessionID].shareDecklist(userID, decklist);
 	},
-	updateBracket: function(userID, sessionID, results) {
+	updateBracket(userID, sessionID, results) {
 		if (Sessions[sessionID].owner !== userID && Sessions[sessionID].bracketLock) return;
 		Sessions[sessionID].updateBracket(results);
 	},
@@ -280,7 +252,7 @@ const socketCallbacks = {
 
 // Socket callback available only to session owners
 const ownerSocketCallbacks = {
-	setOwnerIsPlayer: function(userID, sessionID, val) {
+	setOwnerIsPlayer(userID, sessionID, val) {
 		const sess = Sessions[sessionID];
 		if (sess.drafting) return;
 
@@ -295,7 +267,7 @@ const ownerSocketCallbacks = {
 		for (let user of sess.users)
 			if (user != userID) Connections[user].socket.emit("sessionOptions", { ownerIsPlayer: sess.ownerIsPlayer });
 	},
-	readyCheck: function(userID, sessionID, ack) {
+	readyCheck(userID, sessionID, ack) {
 		const sess = Sessions[sessionID];
 		if (sess.drafting) {
 			ack?.({ code: 1 });
@@ -305,7 +277,7 @@ const ownerSocketCallbacks = {
 		ack?.({ code: 0 });
 		for (let user of sess.users) if (user !== userID) Connections[user].socket.emit("readyCheck");
 	},
-	startDraft: function(userID, sessionID) {
+	startDraft(userID, sessionID) {
 		const sess = Sessions[sessionID];
 		if (sess.drafting) return;
 
@@ -325,21 +297,16 @@ const ownerSocketCallbacks = {
 			startPublicSession(sess);
 		}
 	},
-	stopDraft: function(userID, sessionID) {
-		const sess = Sessions[sessionID];
-		if (!sess.drafting) return;
-		if (sess.winstonDraftState) sess.endWinstonDraft();
-		else if (sess.gridDraftState) sess.endGridDraft();
-		else if (sess.rochesterDraftState) sess.endRochesterDraft();
-		else sess.endDraft();
+	stopDraft(userID, sessionID) {
+		Sessions[sessionID].stopDraft();
 	},
-	pauseDraft: function(userID, sessionID) {
+	pauseDraft(userID, sessionID) {
 		Sessions[sessionID].pauseDraft();
 	},
-	resumeDraft: function(userID, sessionID) {
-		Sessions[sessionID].resumeDraft({ title: "Draft Resumed" });
+	resumeDraft(userID, sessionID) {
+		Sessions[sessionID].resumeDraft();
 	},
-	startGridDraft: function(userID, sessionID, boosterCount) {
+	startGridDraft(userID, sessionID, boosterCount) {
 		const sess = Sessions[sessionID];
 		if (sess.drafting) return;
 		if (sess.users.size == 2) {
@@ -353,7 +320,7 @@ const ownerSocketCallbacks = {
 			});
 		}
 	},
-	startRochesterDraft: function(userID, sessionID) {
+	startRochesterDraft(userID, sessionID) {
 		const sess = Sessions[sessionID];
 		if (!sess || sess.owner != userID || sess.drafting) return;
 
@@ -367,7 +334,7 @@ const ownerSocketCallbacks = {
 			startPublicSession(sess);
 		}
 	},
-	startWinstonDraft: function(userID, sessionID, boosterCount) {
+	startWinstonDraft(userID, sessionID, boosterCount) {
 		const sess = Sessions[sessionID];
 		if (!sess || sess.owner != userID || sess.drafting) return;
 		if (sess.users.size == 2) {
@@ -381,7 +348,7 @@ const ownerSocketCallbacks = {
 		}
 	},
 	// Session Settings
-	setSessionOwner: function(userID, sessionID, newOwnerID) {
+	setSessionOwner(userID, sessionID, newOwnerID) {
 		const sess = Sessions[sessionID];
 		if (newOwnerID === sess.owner || !sess.users.has(newOwnerID)) return;
 
@@ -403,7 +370,7 @@ const ownerSocketCallbacks = {
 			)
 		);
 	},
-	removePlayer: function(userID, sessionID, userToRemove) {
+	removePlayer(userID, sessionID, userToRemove) {
 		if (userToRemove === Sessions[sessionID].owner || !Sessions[sessionID].users.has(userToRemove)) return;
 
 		removeUserFromSession(userToRemove);
@@ -418,13 +385,13 @@ const ownerSocketCallbacks = {
 			text: `You've been removed from session '${sessionID}' by its owner.`,
 		});
 	},
-	setSeating: function(userID, sessionID, seating) {
+	setSeating(userID, sessionID, seating) {
 		if (!Sessions[sessionID].setSeating(seating)) Sessions[sessionID].notifyUserChange(); // Something unexpected happened, notify to avoid any potential de-sync.
 	},
-	randomizeSeating: function(userID, sessionID) {
+	randomizeSeating(userID, sessionID) {
 		if (!Sessions[sessionID].randomizeSeating()) Sessions[sessionID].notifyUserChange(); // Something unexpected happened, notify to avoid any potential de-sync.
 	},
-	boostersPerPlayer: function(userID, sessionID, boostersPerPlayer) {
+	boostersPerPlayer(userID, sessionID, boostersPerPlayer) {
 		if (!Number.isInteger(boostersPerPlayer)) boostersPerPlayer = parseInt(boostersPerPlayer);
 		if (!Number.isInteger(boostersPerPlayer) || boostersPerPlayer <= 0) return;
 
@@ -448,7 +415,7 @@ const ownerSocketCallbacks = {
 
 		Sessions[sessionID].setTeamDraft(teamDraft);
 	},
-	setDistributionMode: function(userID, sessionID, distributionMode) {
+	setDistributionMode(userID, sessionID, distributionMode) {
 		if (!["regular", "shufflePlayerBoosters", "shuffleBoosterPool"].includes(distributionMode)) return;
 
 		Sessions[sessionID].distributionMode = distributionMode;
@@ -457,7 +424,7 @@ const ownerSocketCallbacks = {
 				Connections[user].socket.emit("sessionOptions", { distributionMode: distributionMode });
 		}
 	},
-	setCustomBoosters: function(userID, sessionID, customBoosters) {
+	setCustomBoosters(userID, sessionID, customBoosters) {
 		if (!Array.isArray(customBoosters)) return;
 
 		Sessions[sessionID].customBoosters = customBoosters;
@@ -465,7 +432,7 @@ const ownerSocketCallbacks = {
 			if (user !== userID) Connections[user].socket.emit("sessionOptions", { customBoosters: customBoosters });
 		}
 	},
-	bots: function(userID, sessionID, bots) {
+	bots(userID, sessionID, bots) {
 		if (!Number.isInteger(bots)) bots = parseInt(bots);
 		if (!Number.isInteger(bots)) return;
 
@@ -476,7 +443,7 @@ const ownerSocketCallbacks = {
 			if (user !== userID) Connections[user].socket.emit("bots", bots);
 		}
 	},
-	setRestriction: function(userID, sessionID, setRestriction) {
+	setRestriction(userID, sessionID, setRestriction) {
 		if (!Array.isArray(setRestriction)) return;
 
 		if (setRestriction.length > 0) {
@@ -493,14 +460,14 @@ const ownerSocketCallbacks = {
 		}
 		if (Sessions[sessionID].isPublic) updatePublicSession(sessionID);
 	},
-	parseCustomCardList: function(userID, sessionID, customCardList, ack) {
+	parseCustomCardList(userID, sessionID, customCardList, ack) {
 		if (!customCardList) {
 			ack?.({ code: 1, type: "error", title: "No list supplied." });
 			return;
 		}
 		parseCustomCardList(Sessions[sessionID], customCardList, {}, ack);
 	},
-	loadFromCubeCobra: function(userID, sessionID, data, ack) {
+	loadFromCubeCobra(userID, sessionID, data, ack) {
 		// Cube Infos: https://cubecobra.com/cube/api/cubeJSON/${data.cubeID} ; Cards are listed in the cards array and hold a scryfall id (cardID property), but this endpoint is extremely rate limited.
 		// Plain text card list
 		const fromTextList = (userID, sessionID, data, ack) => {
@@ -593,7 +560,7 @@ const ownerSocketCallbacks = {
 			fromTextList(userID, sessionID, data, ack);
 		}
 	},
-	loadLocalCustomCardList: function(userID, sessionID, cubeName, ack) {
+	loadLocalCustomCardList(userID, sessionID, cubeName, ack) {
 		if (!(cubeName in ParsedCubeLists)) {
 			ack?.({ code: 1, type: "error", title: `Unknown cube '${cubeName}'` });
 			return;
@@ -603,14 +570,14 @@ const ownerSocketCallbacks = {
 
 		ack?.({ code: 0 });
 	},
-	ignoreCollections: function(userID, sessionID, ignoreCollections) {
+	ignoreCollections(userID, sessionID, ignoreCollections) {
 		Sessions[sessionID].ignoreCollections = ignoreCollections;
 		for (let user of Sessions[sessionID].users) {
 			if (user != userID)
 				Connections[user].socket.emit("ignoreCollections", Sessions[sessionID].ignoreCollections);
 		}
 	},
-	setPickTimer: function(userID, sessionID, timerValue) {
+	setPickTimer(userID, sessionID, timerValue) {
 		if (!Number.isInteger(timerValue)) timerValue = parseInt(timerValue);
 		if (!Number.isInteger(timerValue) || timerValue < 0) return;
 
@@ -619,7 +586,7 @@ const ownerSocketCallbacks = {
 			if (user != userID) Connections[user].socket.emit("setPickTimer", timerValue);
 		}
 	},
-	setMaxPlayers: function(userID, sessionID, maxPlayers) {
+	setMaxPlayers(userID, sessionID, maxPlayers) {
 		if (!Number.isInteger(maxPlayers)) maxPlayers = parseInt(maxPlayers);
 		if (!Number.isInteger(maxPlayers) || maxPlayers < 0) return;
 
@@ -628,7 +595,7 @@ const ownerSocketCallbacks = {
 			if (user !== userID) Connections[user].socket.emit("setMaxPlayers", maxPlayers);
 		}
 	},
-	setMythicPromotion: function(userID, sessionID, mythicPromotion) {
+	setMythicPromotion(userID, sessionID, mythicPromotion) {
 		if (typeof mythicPromotion !== "boolean") return;
 
 		Sessions[sessionID].mythicPromotion = mythicPromotion;
@@ -636,7 +603,7 @@ const ownerSocketCallbacks = {
 			if (user !== userID) Connections[user].socket.emit("sessionOptions", { mythicPromotion: mythicPromotion });
 		}
 	},
-	setBoosterContent: function(userID, sessionID, boosterContent) {
+	setBoosterContent(userID, sessionID, boosterContent) {
 		// Validate input (a value for each rarity and at least one card)
 		if (boosterContent === null || !(typeof boosterContent === "object")) return;
 		if (!["common", "uncommon", "rare"].every(r => r in boosterContent)) return;
@@ -650,14 +617,14 @@ const ownerSocketCallbacks = {
 			if (user !== userID) Connections[user].socket.emit("sessionOptions", { boosterContent: boosterContent });
 		}
 	},
-	setUsePredeterminedBoosters: function(userID, sessionID, value, ack) {
+	setUsePredeterminedBoosters(userID, sessionID, value, ack) {
 		Sessions[sessionID].usePredeterminedBoosters = value;
 		Sessions[sessionID].forNonOwners(uid =>
 			Connections[uid].socket.emit("sessionOptions", { usePredeterminedBoosters: value })
 		);
 		ack?.({ code: 0 });
 	},
-	setBoosters: function(userID, sessionID, text, ack) {
+	setBoosters(userID, sessionID, text, ack) {
 		try {
 			let boosters = [];
 			let booster = [];
@@ -710,7 +677,7 @@ const ownerSocketCallbacks = {
 			ack?.({ error: { title: "Internal error." } });
 		}
 	},
-	shuffleBoosters: function(userID, sessionID, ack) {
+	shuffleBoosters(userID, sessionID, ack) {
 		if (!Sessions[sessionID].boosters || Sessions[sessionID].boosters.length === 0) {
 			ack?.({ error: { type: "error", title: "No boosters to shuffle." } });
 		} else {
@@ -718,7 +685,7 @@ const ownerSocketCallbacks = {
 			ack?.({ code: 0 });
 		}
 	},
-	setDraftLogRecipients: function(userID, sessionID, draftLogRecipients) {
+	setDraftLogRecipients(userID, sessionID, draftLogRecipients) {
 		if (typeof draftLogRecipients !== "string") return;
 		draftLogRecipients = draftLogRecipients.toLowerCase();
 		if (!["everyone", "owner", "delayed", "none"].includes(draftLogRecipients)) return;
@@ -730,7 +697,7 @@ const ownerSocketCallbacks = {
 				});
 		}
 	},
-	setMaxDuplicates: function(userID, sessionID, maxDuplicates) {
+	setMaxDuplicates(userID, sessionID, maxDuplicates) {
 		if (maxDuplicates !== null && !(typeof maxDuplicates === "object")) return;
 		if (
 			maxDuplicates !== null &&
@@ -747,7 +714,7 @@ const ownerSocketCallbacks = {
 				});
 		}
 	},
-	setColorBalance: function(userID, sessionID, colorBalance) {
+	setColorBalance(userID, sessionID, colorBalance) {
 		if (colorBalance === Sessions[sessionID].colorBalance) return;
 
 		Sessions[sessionID].colorBalance = colorBalance;
@@ -758,7 +725,7 @@ const ownerSocketCallbacks = {
 				});
 		}
 	},
-	setFoil: function(userID, sessionID, foil) {
+	setFoil(userID, sessionID, foil) {
 		if (foil === Sessions[sessionID].foil) return;
 
 		Sessions[sessionID].foil = foil;
@@ -769,7 +736,7 @@ const ownerSocketCallbacks = {
 				});
 		}
 	},
-	setCollationType: function(userID, sessionID, preferedCollation) {
+	setCollationType(userID, sessionID, preferedCollation) {
 		if (
 			preferedCollation === Sessions[sessionID].preferedCollation ||
 			!["Paper", "MTGA"].includes(preferedCollation)
@@ -784,7 +751,7 @@ const ownerSocketCallbacks = {
 				});
 		}
 	},
-	setUseCustomCardList: function(userID, sessionID, useCustomCardList) {
+	setUseCustomCardList(userID, sessionID, useCustomCardList) {
 		if (useCustomCardList == Sessions[sessionID].useCustomCardList) return;
 
 		Sessions[sessionID].useCustomCardList = useCustomCardList;
@@ -796,7 +763,7 @@ const ownerSocketCallbacks = {
 		}
 		if (Sessions[sessionID].isPublic) updatePublicSession(sessionID);
 	},
-	setPickedCardsPerRound: function(userID, sessionID, pickedCardsPerRound) {
+	setPickedCardsPerRound(userID, sessionID, pickedCardsPerRound) {
 		if (!Number.isInteger(pickedCardsPerRound)) pickedCardsPerRound = parseInt(pickedCardsPerRound);
 		if (!Number.isInteger(pickedCardsPerRound) || pickedCardsPerRound < 1) return;
 
@@ -806,7 +773,7 @@ const ownerSocketCallbacks = {
 				Connections[user].socket.emit("sessionOptions", { pickedCardsPerRound: pickedCardsPerRound });
 		}
 	},
-	setBurnedCardsPerRound: function(userID, sessionID, burnedCardsPerRound) {
+	setBurnedCardsPerRound(userID, sessionID, burnedCardsPerRound) {
 		if (!Number.isInteger(burnedCardsPerRound)) burnedCardsPerRound = parseInt(burnedCardsPerRound);
 		if (!Number.isInteger(burnedCardsPerRound) || burnedCardsPerRound < 0) return;
 
@@ -816,7 +783,7 @@ const ownerSocketCallbacks = {
 				Connections[user].socket.emit("sessionOptions", { burnedCardsPerRound: burnedCardsPerRound });
 		}
 	},
-	setPublic: function(userID, sessionID, isPublic) {
+	setPublic(userID, sessionID, isPublic) {
 		if (isPublic == Sessions[sessionID].isPublic) return;
 
 		Sessions[sessionID].isPublic = isPublic;
@@ -825,7 +792,7 @@ const ownerSocketCallbacks = {
 		}
 		updatePublicSession(sessionID);
 	},
-	setDescription: function(userID, sessionID, description) {
+	setDescription(userID, sessionID, description) {
 		if (description === null || description === undefined || description === Sessions[sessionID].description)
 			return;
 
@@ -835,17 +802,17 @@ const ownerSocketCallbacks = {
 		}
 		updatePublicSession(sessionID);
 	},
-	replaceDisconnectedPlayers: function(userID, sessionID) {
+	replaceDisconnectedPlayers(userID, sessionID) {
 		Sessions[sessionID].replaceDisconnectedPlayers();
 	},
-	distributeSealed: function(userID, sessionID, boostersPerPlayer, customBoosters) {
+	distributeSealed(userID, sessionID, boostersPerPlayer, customBoosters) {
 		if (isNaN(boostersPerPlayer)) return;
 		Sessions[sessionID].distributeSealed(boostersPerPlayer, customBoosters);
 	},
-	distributeJumpstart: function(userID, sessionID) {
+	distributeJumpstart(userID, sessionID) {
 		Sessions[sessionID].distributeJumpstart();
 	},
-	generateBracket: function(userID, sessionID, players, ack) {
+	generateBracket(userID, sessionID, players, ack) {
 		if (
 			!(
 				(players.length === 8 && !Sessions[sessionID].teamDraft) ||
@@ -856,19 +823,24 @@ const ownerSocketCallbacks = {
 		Sessions[sessionID].generateBracket(players);
 		ack?.({ code: 0 });
 	},
-	generateSwissBracket: function(userID, sessionID, players, ack) {
+	generateSwissBracket(userID, sessionID, players, ack) {
 		if (players.length !== 8) return;
 		Sessions[sessionID].generateSwissBracket(players);
 		ack?.({ code: 0 });
 	},
-	lockBracket: function(userID, sessionID, bracketLocked) {
+	generateDoubleBracket(userID, sessionID, players, ack) {
+		if (players.length !== 8) return;
+		Sessions[sessionID].generateDoubleBracket(players);
+		ack?.({ code: 0 });
+	},
+	lockBracket(userID, sessionID, bracketLocked) {
 		Sessions[sessionID].bracketLocked = bracketLocked;
 		for (let user of Sessions[sessionID].users) {
 			if (user !== userID && user in Connections)
 				Connections[user].socket.emit("sessionOptions", { bracketLocked: bracketLocked });
 		}
 	},
-	shareDraftLog: function(userID, sessionID, draftLog) {
+	shareDraftLog(userID, sessionID, draftLog) {
 		const sess = Sessions[sessionID];
 		if (!draftLog) return;
 
@@ -932,6 +904,7 @@ io.on("connection", async function(socket) {
 				const timeout = setTimeout(() => {
 					// Previous connection did not respond in time, close it and continue as normal.
 					targetSocket.disconnect();
+					// Wait for the socket to be properly disconnected and the previous Connection deleted.
 					process.nextTick(() => {
 						resolve();
 					});
@@ -962,14 +935,14 @@ io.on("connection", async function(socket) {
 
 	socket.on("disconnect", function() {
 		const userID = this.userID;
-		if (userID in Connections) {
+		if (userID in Connections && Connections[userID].socket === this) {
 			console.log(
 				`${Connections[userID].userName} [${userID}] disconnected. (${Object.keys(Connections).length -
 					1} players online)`
 			);
 			removeUserFromSession(userID);
 			process.nextTick(() => {
-				delete Connections[userID];
+				if (Connections[userID].socket === this) delete Connections[userID];
 			});
 		}
 	});

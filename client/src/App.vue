@@ -351,7 +351,7 @@
 					<button class="stop" @click="stopDraft">
 						<i class="fas fa-stop"></i> Stop Draft
 					</button>
-					<button v-if="maxTimer > 0" class="stop" @click="pauseDraft">
+					<button v-if="maxTimer > 0" class="stop" :class="{'opaque-disabled': waitingForDisconnectedUsers}" @click="pauseDraft">
 						<i class="fas fa-pause"></i> Pause Draft
 					</button>
 				</div>
@@ -394,100 +394,102 @@
 			></i>
 			<template v-if="!drafting">
 				<draggable
-					tag="ul"
-					class="player-list"
 					v-model="userOrder"
 					@change="changePlayerOrder"
 					:disabled="userID != sessionOwner || drafting"
+					:animation="200"
+					style="flex-grow: 2"
 				>
-					<li
-						v-for="(id, idx) in userOrder"
-						:key="id"
-						:class="{
-							teama: teamDraft && idx % 2 === 0,
-							teamb: teamDraft && idx % 2 === 1,
-							draggable: userID === sessionOwner && !drafting,
-							self: userID === id,
-							bot: userByID[id].isBot,
-						}"
-						:data-userid="id"
-					>
-						<div class="player-name">{{ userByID[id].userName }}</div>
-						<template v-if="userID == sessionOwner">
-							<i
-								class="fas fa-chevron-left clickable move-player move-player-left"
-								v-tooltip="`Move ${userByID[id].userName} to the left`"
-								@click="movePlayer(idx, -1)"
-							></i>
-							<i
-								class="fas fa-chevron-right clickable move-player move-player-right"
-								v-tooltip="`Move ${userByID[id].userName} to the right`"
-								@click="movePlayer(idx, 1)"
-							></i>
-						</template>
-						<div class="status-icons">
-							<i
-								v-if="id === sessionOwner"
-								class="fas fa-crown subtle-gold"
-								v-tooltip="`${userByID[id].userName} is the session owner.`"
-							></i>
-							<template v-if="userID === sessionOwner && id != sessionOwner">
-								<img
-									src="./assets/img/pass_ownership.svg"
-									class="clickable"
-									style="height: 18px; margin-top: -4px;"
-									v-tooltip="`Give session ownership to ${userByID[id].userName}`"
-									@click="setSessionOwner(id)"
-								/>
+					<transition-group type="transition" tag="ul" class="player-list">
+						<li
+							v-for="(id, idx) in userOrder"
+							:key="id"
+							:class="{
+								teama: teamDraft && idx % 2 === 0,
+								teamb: teamDraft && idx % 2 === 1,
+								draggable: userID === sessionOwner && !drafting,
+								self: userID === id,
+								bot: userByID[id].isBot,
+							}"
+							:data-userid="id"
+						>
+							<div class="player-name">{{ userByID[id].userName }}</div>
+							<template v-if="userID == sessionOwner">
 								<i
-									class="fas fa-user-slash clickable red"
-									v-tooltip="`Remove ${userByID[id].userName} from the session`"
-									@click="removePlayer(id)"
+									class="fas fa-chevron-left clickable move-player move-player-left"
+									v-tooltip="`Move ${userByID[id].userName} to the left`"
+									@click="movePlayer(idx, -1)"
+								></i>
+								<i
+									class="fas fa-chevron-right clickable move-player move-player-right"
+									v-tooltip="`Move ${userByID[id].userName} to the right`"
+									@click="movePlayer(idx, 1)"
 								></i>
 							</template>
-							<template v-if="!useCustomCardList && !ignoreCollections">
-								<template v-if="!userByID[id].collection">
+							<div class="status-icons">
+								<i
+									v-if="id === sessionOwner"
+									class="fas fa-crown subtle-gold"
+									v-tooltip="`${userByID[id].userName} is the session owner.`"
+								></i>
+								<template v-if="userID === sessionOwner && id != sessionOwner">
+									<img
+										src="./assets/img/pass_ownership.svg"
+										class="clickable"
+										style="height: 18px; margin-top: -4px;"
+										v-tooltip="`Give session ownership to ${userByID[id].userName}`"
+										@click="setSessionOwner(id)"
+									/>
 									<i
-										class="fas fa-book red"
-										v-tooltip="userByID[id].userName + ' has not uploaded their collection yet.'"
+										class="fas fa-user-slash clickable red"
+										v-tooltip="`Remove ${userByID[id].userName} from the session`"
+										@click="removePlayer(id)"
 									></i>
 								</template>
-								<template v-else-if="userByID[id].collection && !userByID[id].useCollection">
-									<i
-										class="fas fa-book yellow"
-										v-tooltip="
-											userByID[id].userName +
-											' has uploaded their collection, but is not using it.'
-										"
-									></i>
+								<template v-if="!useCustomCardList && !ignoreCollections">
+									<template v-if="!userByID[id].collection">
+										<i
+											class="fas fa-book red"
+											v-tooltip="userByID[id].userName + ' has not uploaded their collection yet.'"
+										></i>
+									</template>
+									<template v-else-if="userByID[id].collection && !userByID[id].useCollection">
+										<i
+											class="fas fa-book yellow"
+											v-tooltip="
+												userByID[id].userName +
+												' has uploaded their collection, but is not using it.'
+											"
+										></i>
+									</template>
+									<template v-else>
+										<i
+											class="fas fa-book green"
+											v-tooltip="userByID[id].userName + ' has uploaded their collection.'"
+										></i>
+									</template>
 								</template>
-								<template v-else>
-									<i
-										class="fas fa-book green"
-										v-tooltip="userByID[id].userName + ' has uploaded their collection.'"
-									></i>
+								<template v-if="pendingReadyCheck">
+									<template v-if="userByID[id].readyState == ReadyState.Ready">
+										<i class="fas fa-check green" v-tooltip="`${userByID[id].userName} is ready!`"></i>
+									</template>
+									<template v-else-if="userByID[id].readyState == ReadyState.NotReady">
+										<i
+											class="fas fa-times red"
+											v-tooltip="`${userByID[id].userName} is NOT ready!`"
+										></i>
+									</template>
+									<template v-else-if="userByID[id].readyState == ReadyState.Unknown">
+										<i
+											class="fas fa-spinner fa-spin"
+											v-tooltip="`Waiting for ${userByID[id].userName} to respond...`"
+										></i>
+									</template>
 								</template>
-							</template>
-							<template v-if="pendingReadyCheck">
-								<template v-if="userByID[id].readyState == ReadyState.Ready">
-									<i class="fas fa-check green" v-tooltip="`${userByID[id].userName} is ready!`"></i>
-								</template>
-								<template v-else-if="userByID[id].readyState == ReadyState.NotReady">
-									<i
-										class="fas fa-times red"
-										v-tooltip="`${userByID[id].userName} is NOT ready!`"
-									></i>
-								</template>
-								<template v-else-if="userByID[id].readyState == ReadyState.Unknown">
-									<i
-										class="fas fa-spinner fa-spin"
-										v-tooltip="`Waiting for ${userByID[id].userName} to respond...`"
-									></i>
-								</template>
-							</template>
-						</div>
-						<div class="chat-bubble" :id="'chat-bubble-' + id"></div>
-					</li>
+							</div>
+							<div class="chat-bubble" :id="'chat-bubble-' + id"></div>
+						</li>
+					</transition-group>
 				</draggable>
 			</template>
 			<template v-else>
@@ -528,20 +530,27 @@
 									v-tooltip="`${user.userName} is the session's owner.`"
 								></i>
 								<template v-if="userID === sessionOwner && user.userID != sessionOwner">
-									<i
-										class="fas fa-user-plus clickable subtle-gold"
-										v-if="ownerIsPlayer"
+									<img
+										src="./assets/img/pass_ownership.svg"
+										class="clickable"
+										:class="{'opaque-disabled': user.userID in disconnectedUsers }"
+										style="height: 18px; margin-top: -4px;"
 										v-tooltip="`Give session ownership to ${user.userName}`"
 										@click="setSessionOwner(user.userID)"
-									></i>
+									/>
 									<i
 										class="fas fa-user-slash clickable red"
+										:class="{'opaque-disabled': user.userID in disconnectedUsers }"
 										v-tooltip="`Remove ${user.userName} from the session`"
 										@click="removePlayer(user.userID)"
 									></i>
 								</template>
 								<template v-if="winstonDraftState || gridDraftState || rochesterDraftState">
-									<i
+									<i v-if="user.userID in disconnectedUsers"
+										class="fas fa-times red"
+										v-tooltip="user.userName + ' is disconnected.'"
+									></i>
+									<i v-else
 										v-show="
 											(winstonDraftState && user.userID === winstonDraftState.currentPlayer) ||
 											(gridDraftState && user.userID === gridDraftState.currentPlayer) ||
@@ -552,7 +561,13 @@
 									></i>
 								</template>
 								<template v-else>
-									<template v-if="user.pickedThisRound">
+									<template v-if="user.userID in disconnectedUsers">
+										<i
+											class="fas fa-times red"
+											v-tooltip="user.userName + ' is disconnected.'"
+										></i>
+									</template>
+									<template v-else-if="user.pickedThisRound">
 										<i
 											class="fas fa-check green"
 											v-tooltip="user.userName + ' has picked a card.'"
@@ -617,7 +632,7 @@
 		</div>
 
 		<!-- Draft Controls -->
-		<template v-if="drafting">
+		<div v-if="drafting" id="draft-container" class="generic-container">
 			<transition :name="'slide-fade-' + (boosterNumber % 2 ? 'left' : 'right')" mode="out-in">
 				<div v-if="draftingState == DraftState.Watching" key="draft-watching" class="draft-watching">
 					<div class="draft-watching-state">
@@ -633,14 +648,15 @@
 							:draftlog="draftLogLive"
 							:show="['owner', 'everyone'].includes(draftLogRecipients)"
 							:language="language"
+							ref="draftloglive"
 						></draft-log-live>
 					</div>
 				</div>
 				<div
 					v-if="draftingState === DraftState.Waiting || draftingState === DraftState.Picking"
 					:key="`draft-picking-${boosterNumber}-${pickNumber}`"
-					id="booster-container"
 					class="container"
+					:class="{'disabled': waitingForDisconnectedUsers || draftPaused}"
 				>
 					<div id="booster-controls" class="section-title">
 						<h2>Your Booster ({{ booster.length }})</h2>
@@ -705,8 +721,9 @@
 			</transition>
 			<!-- Winston Draft -->
 			<div
-				v-if="draftingState === DraftState.WinstonPicking || draftingState === DraftState.WinstonWaiting"
 				class="container"
+				:class="{'disabled': waitingForDisconnectedUsers || draftPaused}"
+				v-if="draftingState === DraftState.WinstonPicking || draftingState === DraftState.WinstonWaiting"
 			>
 				<div class="section-title">
 					<h2>Winston Draft</h2>
@@ -767,7 +784,10 @@
 				</div>
 			</div>
 			<!-- Grid Draft -->
-			<div v-if="draftingState === DraftState.GridPicking || draftingState === DraftState.GridWaiting">
+			<div 
+				:class="{'disabled': waitingForDisconnectedUsers || draftPaused}"
+				v-if="draftingState === DraftState.GridPicking || draftingState === DraftState.GridWaiting"
+			>
 				<div class="section-title">
 					<h2>Grid Draft</h2>
 					<div class="controls">
@@ -805,7 +825,11 @@
 				></grid-draft>
 			</div>
 			<!-- Rochester Draft -->
-			<div class="rochester-container" v-if="draftingState === DraftState.RochesterPicking || draftingState === DraftState.RochesterWaiting">
+			<div
+				class="rochester-container"
+				:class="{'disabled': waitingForDisconnectedUsers || draftPaused}"
+				v-if="draftingState === DraftState.RochesterPicking || draftingState === DraftState.RochesterWaiting"
+			>
 				<div style="flex-grow: 1">
 					<div class="section-title controls">
 						<h2>Rochester Draft</h2>
@@ -869,7 +893,49 @@
 				</div>
 				<pick-summary :picks="rochesterDraftState.lastPicks"></pick-summary>
 			</div>
-		</template>
+			<transition name="fade">
+				<div v-if="draftPaused && !waitingForDisconnectedUsers" class="disconnected-user-popup-container">
+					<div class="disconnected-user-popup">
+						<div class="swal2-icon swal2-warning swal2-icon-show" style="display: flex;"><div class="swal2-icon-content">!</div></div>
+						<h1>Draft Paused</h1>
+						<template v-if="userID === sessionOwner">
+							Resume when you're ready.
+							
+							<div style="margin-top: 1em;">
+								<button @click="socket.emit('resumeDraft')">Resume</button>
+							</div>
+						</template>
+						<template v-else>
+							Wait for the session owner to resume.
+						</template>
+					</div>
+				</div>
+			</transition>
+			<!-- Disconnected User(s) Modal -->
+			<transition name="fade">
+				<div v-if="waitingForDisconnectedUsers" class="disconnected-user-popup-container">
+					<div class="disconnected-user-popup">
+						<div class="swal2-icon swal2-warning swal2-icon-show" style="display: flex;"><div class="swal2-icon-content">!</div></div>
+						<h1>Player(s) disconnected</h1>
+						
+						<div v-if="this.winstonDraftState || this.gridDraftState || this.rochesterDraftState">
+							{{`Wait for ${disconnectedUserNames} to come back...`}}
+						</div>
+						<div v-else>
+							<template v-if="userID === sessionOwner">
+								{{`Wait for ${disconnectedUserNames} to come back, or...`}}
+								<div style="margin-top: 1em;">
+									<button @click="socket.emit('replaceDisconnectedPlayers')" class="stop">Replace them by bot(s)</button>
+								</div>
+							</template>
+							<template v-else>
+								{{`Wait for ${disconnectedUserNames} to come back or for the owner to replace them by bot(s).`}}
+							</template>
+						</div>
+					</div>
+				</div>
+			</transition>
+		</div>
 
 		<!-- Brewing controls (Deck & Sideboard) -->
 		<div
@@ -901,10 +967,9 @@
 						>)
 					</template>
 					<template v-slot:controls>
-						<div style="font-variant: small-caps;">
+						<div style="font-variant: small-caps;" v-if="deck.length > 0">
 							Export
 							<button
-								v-if="deck.length > 0"
 								type="button"
 								@click="exportDeck"
 								v-tooltip.top="'Export deck and sideboard'"
@@ -912,7 +977,6 @@
 								<img class="set-icon" src="./assets/img/mtga-icon.png" /> MTGA
 							</button>
 							<button
-								v-if="deck.length > 0"
 								type="button"
 								@click="exportDeck(false)"
 								v-tooltip.top="'Export without set information'"
@@ -1036,7 +1100,7 @@
 						:list="sideboard"
 						group="deck"
 						@change="$refs.sideboardDisplay.sync() /* Sync sideboard card-pool */"
-						drag-class="drag"
+						:animation="200"
 					>
 						<card
 							v-for="card in sideboard"
@@ -1965,6 +2029,7 @@
 				@updated="updateBracket"
 				@generate="generateBracket"
 				@generate-swiss="generateSwissBracket"
+				@generate-double="generateDoubleBracket"
 				@lock="lockBracket"
 			></bracket>
 		</modal>
@@ -1994,6 +2059,7 @@
 				</p>
 				<h3>Patch Notes</h3>
 				<patch-notes></patch-notes>
+				<span style="font-size: 0.8em">(detailed changes can be found on <a href="https://github.com/Senryoku/MTGADraft" title="GitHub" target="_blank" rel="noopener nofollow"><i class="fab fa-github" style="vertical-align: baseline; padding: 0px 0.25em;"></i>GitHub</a>)</span>
 				<h3>Notice</h3>
 				<p>MTGADraft is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.</p>
 			</div>
@@ -2028,6 +2094,7 @@
 				</div>
 			</div>
 		</modal>
+		<CardPopup :language="language" />
 		<footer>
 			<span @click="displayedModal = 'About'" class="clickable">
 				<a>About</a>

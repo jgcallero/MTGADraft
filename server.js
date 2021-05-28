@@ -392,6 +392,7 @@ const ownerSocketCallbacks = {
 		if (!Sessions[sessionID].randomizeSeating()) Sessions[sessionID].notifyUserChange(); // Something unexpected happened, notify to avoid any potential de-sync.
 	},
 	boostersPerPlayer(userID, sessionID, boostersPerPlayer) {
+		console.log(boostersPerPlayer);
 		if (!Number.isInteger(boostersPerPlayer)) boostersPerPlayer = parseInt(boostersPerPlayer);
 		if (!Number.isInteger(boostersPerPlayer) || boostersPerPlayer <= 0) return;
 
@@ -399,7 +400,8 @@ const ownerSocketCallbacks = {
 
 		Sessions[sessionID].setBoostersPerPlayer(boostersPerPlayer);
 	},
-	setCardsPerBooster(userID, sessionID, cardsPerBooster) {
+	cardsPerBooster(userID, sessionID, cardsPerBooster) {
+		console.log(cardsPerBooster);
 		if (!Number.isInteger(cardsPerBooster)) cardsPerBooster = parseInt(cardsPerBooster);
 		if (!Number.isInteger(cardsPerBooster) || cardsPerBooster <= 0) return;
 		
